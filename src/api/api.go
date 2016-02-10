@@ -5,4 +5,6 @@ func InitApi() {
 
 	// Entry point
 	InitOauthCallback(r)
+
+	InitUsers(r)
 }

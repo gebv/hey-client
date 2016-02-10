@@ -5,12 +5,14 @@ import (
 	"github.com/gorilla/mux"
 	"net/http"
 	"github.com/golang/glog"
-	"net/url"
-	"io/ioutil"
+	// "net/url"
+	// "io/ioutil"
+	"errors"
 )
 
 var heyOauth2Config *oauth2.Config
-var heyClient *http.Client
+var heyClient *HeyClient
+var clientId = "b4c8dd5b-852c-460a-9b4a-26109f9162a2"
 
 func InitOauthCallback(r *mux.Router) {
 	sr := r.PathPrefix("/oauth2").Subrouter()
@@ -20,8 +22,9 @@ func InitOauthCallback(r *mux.Router) {
 }
 
 func init() {
+	
 	heyOauth2Config = &oauth2.Config{
-		ClientID:     "demo",
+		ClientID:     clientId,
 		ClientSecret: "demo",
 		Scopes:       []string{},
 		RedirectURL:  "http://192.168.1.36:65002/api/v1/oauth2/callback",
@@ -31,27 +34,30 @@ func init() {
 		},
 	}
 
+	heyClient = NewHeyClient(heyOauth2Config)
+}
+
+func AuthorizedAtHeyService() error {
 	authCode := oauth2.SetAuthURLParam("client_key", "demo")
 	glog.Infof("oauth login url='%v'", heyOauth2Config.AuthCodeURL("csrf", authCode))
+
+	resp, err := http.Get(heyOauth2Config.AuthCodeURL("csrf", authCode))
+
+	if err != nil {
+		glog.Infof("error connect client_id=%v, err=%v", clientId, err)
+		return err
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		glog.Infof("connect success client_id=%v", clientId)
+		return nil
+	}
+
+	return errors.New("authorization error. unknown reason")
 }
 
 func MeHandler(w http.ResponseWriter, r *http.Request) {
-	_baseUrl, _ := url.Parse(heyOauth2Config.Endpoint.AuthURL)
-
-	_url := url.URL{}
-	_url.Scheme = _baseUrl.Scheme
-	_url.Host = _baseUrl.Host
-	_url.Path = "/api/v1/oauth2/me"
-
-	q := _url.Query()
-
-	// for key, value := range fields {
-	// 	q.Add(key, value)
-	// }
-
-	_url.RawQuery = q.Encode()
-
-	resp, err := heyClient.Get(_url.String())
+	data, err := heyClient.Me()
 
 	if err != nil {
 		glog.Errorf("hey: action='/api/v1/me', err='%s'", err.Error())
@@ -59,17 +65,7 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch resp.StatusCode {
-	case http.StatusOK:
-		data, _ := ioutil.ReadAll(resp.Body)
-		w.Write(data)
-	default:
-		data, _ := ioutil.ReadAll(resp.Body)
-
-		glog.Errorf("hey: action='/api/v1/me', status_code='%v', body='%s'", resp.StatusCode, data)
-		w.WriteHeader(http.StatusBadRequest)
-		return	
-	}
+	w.Write(data.([]byte))
 }
 
 func CallbackHandler(w http.ResponseWriter, r *http.Request) {
@@ -80,6 +76,6 @@ func CallbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	heyClient = heyOauth2Config.Client(oauth2.NoContext, t)
+	heyClient.Client = heyOauth2Config.Client(oauth2.NoContext, t)
 	w.WriteHeader(http.StatusOK)
 }
